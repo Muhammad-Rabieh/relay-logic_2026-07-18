@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Relay Logic — Breadboard-style Simulation</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<style>
+  body {
+    margin: 0;
+    background: #1a1a1a;
+    color: #e8e6df;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+  }
+  h1 { font-size: 18px; font-weight: 500; margin: 0 0 4px; }
+  p.sub { font-size: 13px; color: #a8a69c; margin: 0 0 18px; max-width: 740px; text-align: center; }
+  #controls {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 16px;
+    background: #242424;
+    padding: 12px 18px;
+    border-radius: 10px;
+    border: 1px solid #3a3a3a;
+  }
+  select {
+    background: #2e2e2e; color: #e8e6df; border: 1px solid #4a4a4a;
+    padding: 8px 10px; border-radius: 6px; font-size: 13px;
+  }
+  .label { font-size: 12px; color: #a8a69c; }
+  input[type=range] { width: 120px; }
+  button#resetBtn {
+    background: #2e2e2e; color: #e8e6df; border: 1px solid #4a4a4a;
+    padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer;
+  }
+  #canvasHolder { border-radius: 10px; overflow: hidden; border: 1px solid #3a3a3a; }
+  .hint { font-size: 12px; color: #a8a69c; margin-top: 12px; text-align: center; max-width: 620px; }
+</style>
+</head>
+<body>
+
+<h1>Relay trigger logic — breadboard-style mock-up</h1>
+<p class="sub">Click and hold the push button (bottom left, seated on the breadboard) to simulate the external trigger. The board routes the signal to two relay modules — compare broken vs fixed timing logic.</p>
+
+<div id="controls">
+  <div class="label">Logic mode</div>
+  <select id="modeSel">
+    <option value="broken">Broken (as reported)</option>
+    <option value="fixed" selected>Fixed (one-shot timer)</option>
+  </select>
+  <div class="label">Preset time</div>
+  <input type="range" id="presetSlider" min="500" max="4000" step="100" value="1500">
+  <span class="label" id="presetVal">1500 ms</span>
+  <button id="resetBtn">Reset</button>
+</div>
+
+<div id="canvasHolder"></div>
+<p class="hint">Hold the button past the preset time, then release, to see the difference: in "broken" mode relay 2's lamp tracks the button exactly; in "fixed" mode it switches off on its own while you're still holding the button.</p>
+
+<script>
+let trigHeld = false;
+let mode = 'fixed';
+let presetMs = 1500;
+let relay1 = false;
+let relay2 = false;
+let relay2TimerStart = null;
+let lastTrig = false;
+
+const W = 840, H = 480;
+const BTN = { x: 120, y: 235, r: 34 };
+const PCB = { x: 260, y: 60, w: 280, h: 320 };
+const R1 = { x: 610, y: 100, w: 160, h: 150 };
+const R2 = { x: 610, y: 290, w: 160, h: 150 };
+
+function setup() {
+  const c = createCanvas(W, H);
+  c.parent('canvasHolder');
+  frameRate(60);
+
+  document.getElementById('modeSel').addEventListener('change', (e) => { mode = e.target.value; });
+  document.getElementById('presetSlider').addEventListener('input', (e) => {
+    presetMs = parseInt(e.target.value);
+    document.getElementById('presetVal').textContent = presetMs + ' ms';
+  });
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    relay1 = false; relay2 = false; relay2TimerStart = null; lastTrig = false;
+  });
+}
+
+function isOverButton(px, py) {
+  return dist(px, py, BTN.x, BTN.y) < BTN.r;
+}
+
+function mousePressed() {
+  if (isOverButton(mouseX, mouseY)) trigHeld = true;
+}
+function mouseReleased() { trigHeld = false; }
+function touchStarted() {
+  if (isOverButton(mouseX, mouseY)) { trigHeld = true; return false; }
+  return true;
+}
+function touchEnded() { trigHeld = false; return true; }
+
+function updateLogic() {
+  const now = millis();
+  const risingEdge = trigHeld && !lastTrig;
+  relay1 = trigHeld;
+
+  if (mode === 'broken') {
+    relay2 = trigHeld;
+    if (!trigHeld) relay2TimerStart = null;
+  } else {
+    if (risingEdge) { relay2 = true; relay2TimerStart = now; }
+    if (relay2TimerStart !== null && now - relay2TimerStart >= presetMs) {
+      relay2 = false;
+      relay2TimerStart = null;
+    }
+  }
+  lastTrig = trigHeld;
+}
+
+function draw() {
+  background(24, 24, 24);
+  updateLogic();
+
+  drawBreadboard(20, 150, 200, 170);
+  drawPushButton(BTN.x, BTN.y, BTN.r, trigHeld);
+  drawPCB();
+  drawRelayModule(R1, relay1, 'RELAY 1', 'follows trigger');
+  drawRelayModule(R2, relay2, 'RELAY 2', 'preset one-shot');
+  drawBulb(790, R1.y + 76, relay1);
+  drawBulb(790, R2.y + 76, relay2);
+
+  drawWires();
+  drawFooter();
+}
+
+function drawBreadboard(x, y, w, h) {
+  push();
+  translate(x, y);
+  noStroke();
+  fill(214, 198, 158);
+  rect(0, 0, w, h, 8);
+  fill(150, 132, 96);
+  for (let gy = 14; gy < h - 10; gy += 11) {
+    for (let gx = 10; gx < w - 6; gx += 11) {
+      circle(gx, gy, 2.4);
+    }
+  }
+  fill(90, 74, 46);
+  noStroke();
+  textAlign(CENTER, TOP);
+  textSize(10);
+  text('BREADBOARD', w / 2, h - 16);
+  pop();
+}
+
+function drawPushButton(x, y, r, pressed) {
+  push();
+  translate(x, y);
+  const base = r * 1.55;
+  stroke(70); strokeWeight(2);
+  for (const dx of [-14, -5, 5, 14]) {
+    line(dx, base / 2, dx, base / 2 + 12);
+  }
+  noStroke();
+  fill(40);
+  rectMode(CENTER);
+  rect(0, 0, base, base, 4);
+  fill(pressed ? color(90, 200, 150) : color(210, 60, 60));
+  const capSize = pressed ? r * 0.95 : r * 1.05;
+  rect(0, pressed ? 2 : 0, capSize, capSize, 6);
+  rectMode(CORNER);
+  noStroke();
+  fill(220);
+  textAlign(CENTER, TOP);
+  textSize(11);
+  text('trigger', 0, base / 2 + 18);
+  pop();
+}
+
+function drawPCB() {
+  push();
+  translate(PCB.x, PCB.y);
+  const w = PCB.w, h = PCB.h;
+  noStroke();
+  fill(22, 74, 48);
+  rect(0, 0, w, h, 6);
+  stroke(34, 96, 60);
+  strokeWeight(1);
+  for (let i = 20; i < w; i += 24) line(i, 6, i, h - 6);
+  for (let j = 20; j < h; j += 24) line(6, j, w - 6, j);
+
+  noStroke();
+  fill(190);
+  for (const [hx, hy] of [[15, 15], [w - 15, 15], [15, h - 15], [w - 15, h - 15]]) {
+    circle(hx, hy, 9);
+    fill(22, 74, 48);
+    circle(hx, hy, 3.5);
+    fill(190);
+  }
+
+  fill(235);
+  textAlign(CENTER, TOP);
+  textSize(12);
+  text('MAIN PCB', w / 2, 14);
+  fill(170, 225, 195);
+  textSize(10);
+  text(mode === 'broken' ? 'sort logic: broken' : 'sort logic: fixed', w / 2, 30);
+
+  drawChip(w / 2 - 30, h / 2 - 18, 60, 34);
+
+  const trigY = 175;
+  fill(120, 200, 165);
+  noStroke();
+  textSize(9);
+  textAlign(LEFT, CENTER);
+  text('TRIG', 10, trigY - 12);
+  drawPin(0, trigY, trigHeld);
+
+  textAlign(RIGHT, CENTER);
+  text('to R1', w - 8, 132);
+  drawPin(w, 132, relay1, true);
+  drawPin(w, 154, false, true, true);
+  drawPin(w, 176, relay1, true);
+
+  text('to R2', w - 8, 322);
+  drawPin(w, 322, relay2, true);
+  drawPin(w, 344, false, true, true);
+  drawPin(w, 366, relay2, true);
+
+  drawTrace(0, trigY, w / 2 - 30, trigY, trigHeld);
+  drawTrace(w / 2 - 30, trigY, w / 2, h / 2 - 4, trigHeld);
+  drawTrace(w / 2 + 30, h / 2 - 10, w, 132, relay1);
+  drawTrace(w / 2 + 30, h / 2 + 10, w, 366, relay2);
+  pop();
+}
+
+function drawPin(x, y, active, isRight, isGround) {
+  noStroke();
+  fill(isGround ? color(120) : (active ? color(255, 190, 80) : color(150, 150, 150)));
+  circle(x, y, 6);
+}
+
+function drawChip(x, y, w, h) {
+  push();
+  translate(x, y);
+  noStroke();
+  fill(16);
+  rect(0, 0, w, h, 2);
+  fill(230);
+  circle(7, 7, 4);
+  textAlign(CENTER, CENTER);
+  textSize(9);
+  fill(205);
+  text('LOGIC', w / 2, h / 2);
+  stroke(16); strokeWeight(2);
+  for (let i = 0; i < 4; i++) {
+    const py = 7 + i * (h - 14) / 3;
+    line(-6, py, 0, py);
+    line(w, py, w + 6, py);
+  }
+  pop();
+}
+
+function drawTrace(x1, y1, x2, y2, active) {
+  stroke(active ? color(255, 200, 90) : color(55, 115, 80));
+  strokeWeight(active ? 3 : 2);
+  noFill();
+  line(x1, y1, x2, y2);
+}
+
+function drawRelayModule(m, energized, label, sub) {
+  push();
+  translate(m.x, m.y);
+  const w = m.w, h = m.h;
+  noStroke();
+  fill(38, 88, 168);
+  rect(0, 0, w, h, 6);
+  stroke(60, 110, 190); strokeWeight(1); noFill();
+  rect(0, 0, w, h, 6);
+
+  noStroke();
+  fill(235);
+  textAlign(CENTER, TOP);
+  textSize(11);
+  text(label, w / 2, 8);
+  fill(200, 220, 245);
+  textSize(9);
+  text(sub, w / 2, 22);
+
+  for (const ly of [32, 54, 76]) {
+    fill(210); noStroke();
+    rect(0, ly - 4, 8, 8, 1);
+  }
+  fill(200, 220, 245);
+  textAlign(LEFT, CENTER);
+  textSize(8);
+  text('IN', 12, 54);
+
+  fill(20);
+  noStroke();
+  rect(24, 90, w - 66, 44, 6);
+  fill(energized ? color(255, 200, 90) : color(60));
+  circle(w - 24, 34, 9);
+  stroke(energized ? color(255, 230, 160) : color(90));
+  strokeWeight(1); noFill();
+  circle(w - 24, 34, 9);
+
+  for (const ly of [32, 54, 76]) {
+    fill(230, 200, 90); noStroke();
+    rect(w - 14, ly - 5, 14, 10, 1);
+  }
+  fill(200, 220, 245);
+  textAlign(RIGHT, CENTER);
+  textSize(8);
+  text('OUT', w - 20, 54);
+
+  noStroke();
+  fill(225);
+  textAlign(CENTER, TOP);
+  textSize(9);
+  text(energized ? 'ON' : 'OFF', w / 2, h - 16);
+  pop();
+}
+
+function drawBulb(x, y, on) {
+  push();
+  translate(x, y);
+  stroke(140); strokeWeight(1.5);
+  line(-16, 0, -6, 0);
+  noStroke();
+  fill(on ? color(255, 205, 90) : color(70));
+  circle(0, 0, 24);
+  stroke(on ? color(255, 225, 150) : color(100));
+  strokeWeight(1);
+  noFill();
+  circle(0, 0, 24);
+  fill(50);
+  noStroke();
+  rect(-6, 11, 12, 6, 1);
+  fill(200);
+  textAlign(CENTER, TOP);
+  textSize(9);
+  text('load', 0, 22);
+  pop();
+}
+
+function drawWires() {
+  noFill();
+  strokeWeight(2.5);
+  stroke(trigHeld ? color(255, 210, 100) : color(120, 120, 120));
+  bezier(BTN.x + BTN.r, BTN.y, BTN.x + 60, BTN.y - 40, PCB.x - 40, PCB.y + 175 - 20, PCB.x, PCB.y + 175);
+
+  strokeWeight(2);
+  stroke(relay1 ? color(255, 210, 100) : color(120, 120, 120));
+  bezier(PCB.x + PCB.w, PCB.y + 176, PCB.x + PCB.w + 20, PCB.y + 176, R1.x - 20, R1.y + 76, R1.x, R1.y + 76);
+
+  stroke(relay2 ? color(255, 210, 100) : color(120, 120, 120));
+  bezier(PCB.x + PCB.w, PCB.y + 366, PCB.x + PCB.w + 20, PCB.y + 366, R2.x - 20, R2.y + 76, R2.x, R2.y + 76);
+
+  strokeWeight(1.5);
+  stroke(relay1 ? color(255, 210, 100) : color(70));
+  line(R1.x + R1.w, R1.y + 76, 774, R1.y + 76);
+  stroke(relay2 ? color(255, 210, 100) : color(70));
+  line(R2.x + R2.w, R2.y + 76, 774, R2.y + 76);
+}
+
+function drawFooter() {
+  noStroke();
+  fill(168, 166, 156);
+  textAlign(LEFT, TOP);
+  textSize(11);
+  const msg = mode === 'broken'
+    ? 'Broken: relay 2 mirrors the trigger — ignores its preset timer'
+    : 'Fixed: relay 2 fires once, runs its own timer, ignores the trigger afterward';
+  text(msg, 20, H - 30);
+
+  if (relay2TimerStart !== null && mode === 'fixed') {
+    const remain = Math.max(0, presetMs - (millis() - relay2TimerStart));
+    fill(255, 190, 80);
+    textSize(12);
+    text('Relay 2 timer: ' + Math.round(remain) + ' ms remaining', 20, H - 48);
+  }
+}
+</script>
+
+</body>
+</html>
