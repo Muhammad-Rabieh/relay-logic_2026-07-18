@@ -5,6 +5,8 @@ An external trigger source (sensor, switch, or PLC signal) feeds into an existin
 Current fault
 The board has a logic bug causing Relay 2 to ignore its own timer and instead track the trigger signal exactly like Relay 1. If the trigger is held longer than the preset time, Relay 2 stays energized the entire time. If the trigger is released early, Relay 2 drops immediately. This breaks the intended timed-latch behavior.
 
+<img width="1018" height="608" alt="Peek 2026-07-18 19-28" src="https://github.com/user-attachments/assets/c0824459-b9f4-4900-8025-a60a0fac584b" />
+
 Proposed scope
 Diagnose and repair the existing PCB — not a ground-up redesign. The fix involves isolating Relay 2's drive logic from the raw trigger line and restoring its independent timing path (whether that is a discrete 555 monostable stage, a microcontroller timer routine, or dedicated timer IC logic). After repair, the board will be bench-tested to verify:
 Relay 1 still follows the trigger faithfully.
